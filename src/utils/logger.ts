@@ -23,17 +23,9 @@ const defaultConfig: LoggerConfig = {
   pretty: true,
 };
 
-// Create Pino logger instance
+// Create Pino logger instance - simplified to avoid transport issues
 const pinoLogger = pino({
   level: process.env.LOG_LEVEL || defaultConfig.level,
-  transport: defaultConfig.pretty
-    ? {
-        target: "pino-pretty",
-        options: {
-          colorize: true,
-        },
-      }
-    : undefined,
 });
 
 // Setup file logger if needed

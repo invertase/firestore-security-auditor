@@ -1,10 +1,18 @@
 #!/usr/bin/env node
-
+import { config } from "dotenv";
+config(); // Load environment variables from .env file
 import * as fs from "fs";
 import * as path from "path";
 import logger, { LogLevel } from "./utils/logger";
 import { NotFoundError, InternalError } from "./utils/errors";
 import { options } from "./commander/program";
+import { fetchRulesFromProject } from "./rules/fetch";
+import { auditFlow } from "./genkit/flows/audit";
+export { auditFlow } from "./genkit/flows/audit";
+import { formatAuditResultForOutput } from "./utils/formatAuditResultForOutput";
+
+// Variable to store the rules content globally
+let rulesContent: string = "";
 
 /**
  * Main function to run the audit
@@ -43,11 +51,11 @@ async function runAudit() {
         throw new NotFoundError("Rules file", rulesPath);
       }
 
-      // This is where you would parse and process the rules file
-      const rulesContent = fs.readFileSync(rulesPath, "utf8");
+      // Read the rules file
+      rulesContent = fs.readFileSync(rulesPath, "utf8");
       logger.info(`Rules file loaded (${rulesContent.length} bytes)`);
 
-      // STUB: Process rules
+      // Process rules
       processRules(rulesContent);
     } catch (error) {
       if (error instanceof NotFoundError) {
@@ -62,16 +70,17 @@ async function runAudit() {
       "No rules file provided, will attempt to fetch rules from project"
     );
 
-    // STUB: Fetch rules from project
+    // Fetch rules from project
     try {
-      await fetchRulesFromProject(options.project);
+      rulesContent = await fetchRulesFromProject(options.project);
+      processRules(rulesContent);
     } catch (error) {
       logger.error("Failed to fetch rules from project", error);
       process.exit(1);
     }
   }
 
-  // STUB: Run the audit
+  // Run the audit
   try {
     await performAudit(options.project);
     logger.success("Audit completed successfully!");
@@ -82,16 +91,25 @@ async function runAudit() {
 }
 
 /**
- * STUB: Process rules from file
+ * Process rules from file
  */
-function processRules(rulesContent: string): void {
+function processRules(rules: string): void {
   // This is where you would parse and analyze the rules
   logger.info("Processing rules...");
 
-  try {
-    // Stub implementation - add your rule processing logic here
+  logger.info(`Rules content length: ${rules.length} bytes`);
+  if (options.verbose) {
+    logger.debug("Rules content:", rules);
+  }
 
-    // Simulate successful processing
+  try {
+    // Basic validation that these are Firestore rules
+    if (!rules.includes("service cloud.firestore")) {
+      logger.warn(
+        "The provided content may not be valid Firestore security rules"
+      );
+    }
+
     logger.debug("Rules processed successfully");
   } catch (error) {
     logger.error("Failed to process rules", error);
@@ -100,43 +118,96 @@ function processRules(rulesContent: string): void {
 }
 
 /**
- * STUB: Fetch rules from Firestore project
- */
-async function fetchRulesFromProject(projectId: string): Promise<void> {
-  // This is where you would fetch rules from the Firestore project
-  logger.info(`Fetching rules for project: ${projectId}...`);
-
-  try {
-    // Stub implementation - add your project fetching logic here
-
-    // Simulate successful fetch
-    logger.debug(`Rules fetched from project ${projectId}`);
-  } catch (error) {
-    logger.error(`Failed to fetch rules for project ${projectId}`, error);
-    throw new InternalError(`Failed to fetch rules`);
-  }
-}
-
-/**
- * STUB: Perform the security audit
+ * Perform the security audit using Gemini
  */
 async function performAudit(projectId: string): Promise<void> {
-  // This is where you would implement the security audit logic
   logger.info(`Performing security audit for project: ${projectId}...`);
 
   try {
-    // Stub implementation - add your audit logic here
+    // Make sure we have rules content
+    if (!rulesContent || rulesContent.trim() === "") {
+      throw new Error("No rules content available for audit");
+    }
 
-    // Simulate successful audit
-    logger.debug(`Audit completed for project ${projectId}`);
+    logger.info("Sending rules to AI for analysis...");
+
+    // Call the auditFlow with rules content and project ID
+    const result = await auditFlow({
+      rules: rulesContent,
+      projectId: projectId,
+    });
+
+    // Log the audit results
+    logger.info(
+      `Audit completed with overall rating: ${result.overallRating}/10`
+    );
+
+    // Log vulnerabilities
+    if (result.vulnerabilities.length > 0) {
+      logger.info(`Found ${result.vulnerabilities.length} vulnerabilities:`);
+
+      for (const vuln of result.vulnerabilities) {
+        const severityColor = getSeverityColor(vuln.severity);
+        logger.info(`[${severityColor}] ${vuln.description}`);
+        logger.info(`  Recommendation: ${vuln.recommendation}`);
+        if (vuln.location) {
+          logger.info(`  Location: ${vuln.location}`);
+        }
+      }
+    } else {
+      logger.info("No vulnerabilities found.");
+    }
+
+    // Log best practices
+    if (result.bestPractices.length > 0) {
+      logger.info("Best practices recommendations:");
+      result.bestPractices.forEach((practice, index) => {
+        logger.info(`${index + 1}. ${practice}`);
+      });
+    }
+
+    // Log summary
+    logger.info("Summary: " + result.summary);
+
+    // Print output to a file if requested
+    if (options.outputFile) {
+      const outputPath = path.resolve(options.outputFile);
+      const outputDir = path.dirname(outputPath);
+
+      // Ensure output directory exists
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+
+      // Create formatted output
+      const formattedOutput = formatAuditResultForOutput(result);
+
+      // Write to file
+      fs.writeFileSync(outputPath, formattedOutput);
+      logger.success(`Audit results written to ${outputPath}`);
+    }
   } catch (error) {
     logger.error(`Failed to perform audit for project ${projectId}`, error);
     throw new InternalError(`Audit failed`);
   }
 }
 
-// Run the audit
-runAudit().catch((error) => {
-  logger.fatal("Unexpected error during audit execution", error);
-  process.exit(1);
-});
+/**
+ * Helper function to get color based on severity
+ */
+function getSeverityColor(severity: string): string {
+  switch (severity.toLowerCase()) {
+    case "critical":
+      return "CRITICAL";
+    case "high":
+      return "HIGH";
+    case "medium":
+      return "MEDIUM";
+    case "low":
+      return "LOW";
+    default:
+      return severity.toUpperCase();
+  }
+}
+
+runAudit();
