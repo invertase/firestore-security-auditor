@@ -1,6 +1,6 @@
 import { execSync } from "child_process";
 import { GoogleAuth } from "google-auth-library";
-import logger from "../utils/logger";
+import { logger } from "../utils/logger";
 import { NotFoundError, InternalError } from "../utils/errors";
 
 /**

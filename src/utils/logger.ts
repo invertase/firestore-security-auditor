@@ -1,12 +1,10 @@
+// utils/logger.ts
 import chalk from "chalk";
 import pino from "pino";
 import * as fs from "fs";
 import * as path from "path";
 
-// Define log levels
 export type LogLevel = "debug" | "info" | "warn" | "error" | "fatal";
-
-// Configuration interface
 interface LoggerConfig {
   level: LogLevel;
   enableConsole: boolean;
@@ -15,146 +13,119 @@ interface LoggerConfig {
   pretty?: boolean;
 }
 
-// Default configuration
+// lower default to warn
 const defaultConfig: LoggerConfig = {
-  level: "info",
+  level: "warn",
   enableConsole: true,
   enableFile: false,
   pretty: true,
 };
 
-// Create Pino logger instance - simplified to avoid transport issues
-const pinoLogger = pino({
-  level: process.env.LOG_LEVEL || defaultConfig.level,
-});
+// numeric weights
+const levelValues: Record<LogLevel, number> = {
+  debug: 10,
+  info: 20,
+  warn: 30,
+  error: 40,
+  fatal: 50,
+};
 
-// Setup file logger if needed
+let currentConfig = { ...defaultConfig };
+
+const pinoLogger = pino(
+  { level: process.env.LOG_LEVEL || defaultConfig.level },
+  pino.destination({ dest: "/dev/null", sync: false })
+);
+
 let fileLogger: pino.Logger | null = null;
 
-/**
- * Initialize the logger with custom configuration
- */
-export function initLogger(config: Partial<LoggerConfig> = {}): void {
-  const finalConfig = { ...defaultConfig, ...config };
+export function initLogger(config: Partial<LoggerConfig> = {}) {
+  currentConfig = { ...defaultConfig, ...config };
+  pinoLogger.level = currentConfig.level;
 
-  // Update Pino logger level
-  pinoLogger.level = finalConfig.level;
-
-  // Setup file logger if enabled
-  if (finalConfig.enableFile && finalConfig.logFile) {
-    const logDir = path.dirname(finalConfig.logFile);
-
-    // Ensure log directory exists
-    if (!fs.existsSync(logDir)) {
-      fs.mkdirSync(logDir, { recursive: true });
-    }
-
+  if (currentConfig.enableFile && currentConfig.logFile) {
+    const logDir = path.dirname(currentConfig.logFile);
+    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
     fileLogger = pino(
-      { level: finalConfig.level },
-      pino.destination(finalConfig.logFile)
+      { level: currentConfig.level },
+      pino.destination(currentConfig.logFile)
     );
   }
 }
 
-/**
- * Log a debug message
- */
-export function debug(message: string, data?: any): void {
-  if (defaultConfig.enableConsole) {
-    console.log(chalk.gray(`[DEBUG] ${message}`));
+function shouldConsoleLog(level: LogLevel) {
+  return (
+    currentConfig.enableConsole &&
+    levelValues[level] >= levelValues[currentConfig.level]
+  );
+}
+
+export function debug(msg: string, data?: any) {
+  if (shouldConsoleLog("debug")) {
+    console.log(chalk.gray(`[DEBUG] ${msg}`));
     if (data) console.log(chalk.gray(JSON.stringify(data, null, 2)));
   }
-
-  pinoLogger.debug(data || {}, message);
-  fileLogger?.debug(data || {}, message);
+  pinoLogger.debug(data || {}, msg);
+  fileLogger?.debug(data || {}, msg);
 }
 
-/**
- * Log an info message
- */
-export function info(message: string, data?: any): void {
-  if (defaultConfig.enableConsole) {
-    console.log(chalk.blue(`[INFO] ${message}`));
+export function info(msg: string, data?: any) {
+  if (shouldConsoleLog("info")) {
+    console.log(chalk.blue(`[INFO]  ${msg}`));
     if (data) console.log(data);
   }
-
-  pinoLogger.info(data || {}, message);
-  fileLogger?.info(data || {}, message);
+  pinoLogger.info(data || {}, msg);
+  fileLogger?.info(data || {}, msg);
 }
 
-/**
- * Log a success message
- */
-export function success(message: string, data?: any): void {
-  if (defaultConfig.enableConsole) {
-    console.log(chalk.green(`[SUCCESS] ${message}`));
+export function success(msg: string, data?: any) {
+  if (shouldConsoleLog("info")) {
+    console.log(chalk.green(`[SUCCESS] ${msg}`));
     if (data) console.log(data);
   }
-
-  pinoLogger.info({ success: true, ...data }, message);
-  fileLogger?.info({ success: true, ...data }, message);
+  pinoLogger.info({ success: true, ...data }, msg);
+  fileLogger?.info({ success: true, ...data }, msg);
 }
 
-/**
- * Log a warning message
- */
-export function warn(message: string, data?: any): void {
-  if (defaultConfig.enableConsole) {
-    console.log(chalk.yellow(`[WARNING] ${message}`));
+export function warn(msg: string, data?: any) {
+  if (shouldConsoleLog("warn")) {
+    console.log(chalk.yellow(`[WARNING] ${msg}`));
     if (data) console.log(data);
   }
-
-  pinoLogger.warn(data || {}, message);
-  fileLogger?.warn(data || {}, message);
+  pinoLogger.warn(data || {}, msg);
+  fileLogger?.warn(data || {}, msg);
 }
 
-/**
- * Log an error message
- */
-export function error(message: string, err?: Error | any): void {
-  if (defaultConfig.enableConsole) {
-    console.error(chalk.red(`[ERROR] ${message}`));
-    if (err?.stack) {
-      console.error(chalk.red(err.stack));
-    } else if (err) {
-      console.error(chalk.red(JSON.stringify(err, null, 2)));
-    }
+export function error(msg: string, err?: Error | any) {
+  if (shouldConsoleLog("error")) {
+    console.error(chalk.red(`[ERROR] ${msg}`));
+    if (err?.stack) console.error(chalk.red(err.stack));
+    else if (err) console.error(chalk.red(JSON.stringify(err, null, 2)));
   }
-
   if (err instanceof Error) {
-    pinoLogger.error({ err }, message);
-    fileLogger?.error({ err }, message);
+    pinoLogger.error({ err }, msg);
+    fileLogger?.error({ err }, msg);
   } else {
-    pinoLogger.error(err || {}, message);
-    fileLogger?.error(err || {}, message);
+    pinoLogger.error(err || {}, msg);
+    fileLogger?.error(err || {}, msg);
   }
 }
 
-/**
- * Log a fatal error message
- */
-export function fatal(message: string, err?: Error | any): void {
-  if (defaultConfig.enableConsole) {
-    console.error(chalk.bgRed.white(`[FATAL] ${message}`));
-    if (err?.stack) {
-      console.error(chalk.red(err.stack));
-    } else if (err) {
-      console.error(chalk.red(JSON.stringify(err, null, 2)));
-    }
+export function fatal(msg: string, err?: Error | any) {
+  if (shouldConsoleLog("fatal")) {
+    console.error(chalk.bgRed.white(`[FATAL] ${msg}`));
+    if (err?.stack) console.error(chalk.red(err.stack));
+    else if (err) console.error(chalk.red(JSON.stringify(err, null, 2)));
   }
-
   if (err instanceof Error) {
-    pinoLogger.fatal({ err }, message);
-    fileLogger?.fatal({ err }, message);
+    pinoLogger.fatal({ err }, msg);
+    fileLogger?.fatal({ err }, msg);
   } else {
-    pinoLogger.fatal(err || {}, message);
-    fileLogger?.fatal(err || {}, message);
+    pinoLogger.fatal(err || {}, msg);
+    fileLogger?.fatal(err || {}, msg);
   }
 }
 
-/**
- * Create a logger object with all methods
- */
 export const logger = {
   debug,
   info,
@@ -164,6 +135,3 @@ export const logger = {
   fatal,
   initLogger,
 };
-
-// Export default logger
-export default logger;

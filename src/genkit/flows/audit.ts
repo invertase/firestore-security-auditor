@@ -1,7 +1,8 @@
 import { z } from "genkit";
 import { gemini20Flash } from "@genkit-ai/googleai";
 import { ai } from "../client";
-import logger from "../../utils/logger";
+import { logger } from "../../utils/logger";
+import { examplesXML } from "../docs";
 
 // Define schemas for input and output
 const InputSchema = z.object({
@@ -65,6 +66,17 @@ Respond with a structured analysis that includes:
 - Specific recommendations for each vulnerability
 - Best practices that should be implemented
 - An overall security rating from 1-10
+
+Here are some examples of good and bad practices:
+${examplesXML}
+
+Remember to respond with a structured analysis that includes:
+- A summary of the overall security posture
+- A list of vulnerabilities found (with severity rating)
+- Specific recommendations for each vulnerability
+- Best practices that should be implemented
+- An overall security rating from 1-10
+
 `;
 
     logger.debug("Sending rules to AI for analysis");
