@@ -1,6 +1,6 @@
 # Firestore Security Auditor
 
-A command-line tool to audit Firestore security rules for potential vulnerabilities and best practices.
+A command-line tool to audit Firestore security rules for potential vulnerabilities and best practices. test
 
 ## Installation
 
